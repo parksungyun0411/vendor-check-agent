@@ -1,0 +1,49 @@
+{
+  "_note": "SYNTHETIC — 실제 기업이 아님. 오프라인 테스트용으로 지어낸 값이며 측정 결과에 쓰지 않는다. 번호는 모두 0으로 시작하는 가짜 번호다.",
+  "companies": [
+    {
+      "id": "syn-01",
+      "corp_name": "가상테스트상사",
+      "crno": "0000000000011",
+      "bzno": "0000000011",
+      "ceo_name": "테스트대표일",
+      "market": "KOSPI",
+      "corp_code": "09000011",
+      "b_stt_cd": "01",
+      "tax_type_cd": "01"
+    },
+    {
+      "id": "syn-02a",
+      "corp_name": "가상동명산업",
+      "crno": "0000000000021",
+      "bzno": "0000000021",
+      "ceo_name": "테스트대표이",
+      "market": "NONE",
+      "corp_code": null,
+      "b_stt_cd": "01",
+      "tax_type_cd": "01"
+    },
+    {
+      "id": "syn-02b",
+      "corp_name": "가상동명산업",
+      "crno": "0000000000022",
+      "bzno": "0000000022",
+      "ceo_name": "테스트대표삼",
+      "market": "KOSDAQ",
+      "corp_code": "09000022",
+      "b_stt_cd": "01",
+      "tax_type_cd": "01"
+    },
+    {
+      "id": "syn-03",
+      "corp_name": "가상폐업물산",
+      "crno": "0000000000031",
+      "bzno": "0000000031",
+      "ceo_name": "테스트대표사",
+      "market": "NONE",
+      "corp_code": null,
+      "b_stt_cd": "03",
+      "tax_type_cd": "01"
+    }
+  ]
+}

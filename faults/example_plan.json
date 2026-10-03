@@ -1,0 +1,5 @@
+[
+  {"agency": "fsc", "kind": "error_200", "times": 1},
+  {"agency": "nts", "kind": "quota", "after": 5},
+  {"agency": "dart", "kind": "timeout", "delay_s": 15}
+]
