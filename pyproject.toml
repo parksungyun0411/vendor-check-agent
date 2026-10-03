@@ -1,0 +1,38 @@
+[project]
+name = "vendor-check-agent"
+version = "0.1.0"
+description = "공공 API 실패를 주입해 거래처 점검 에이전트의 복구율을 재는 실험"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=1.2,<2",
+    "langgraph-checkpoint-sqlite>=3.1,<4",
+    "mcp>=2.3,<3",
+    "httpx>=0.28,<1",
+    "starlette>=1.0",
+    "uvicorn>=0.30",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=1.11,<2"]
+dev = ["pytest>=9", "pytest-asyncio>=1.0", "ruff>=0.16"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vendor_check"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
