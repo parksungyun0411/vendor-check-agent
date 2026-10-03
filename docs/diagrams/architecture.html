@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>vendor-check-agent · 아키텍처</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #f1f5f9; }
+  body {
+    font-family: "Apple SD Gothic Neo", "Pretendard", -apple-system, system-ui, "Noto Sans KR", sans-serif;
+    -webkit-font-smoothing: antialiased; padding: 30px; width: 1020px;
+  }
+  .diagram { width: 960px; background: #fff; border-radius: 18px; padding: 28px 30px; border: 1px solid #e2e8f0; }
+  .title { font-size: 13px; font-weight: 800; letter-spacing: .04em; color: #94a3b8; margin-bottom: 20px; }
+  .title b { color: #0f5132; }
+
+  .layer { display: flex; align-items: stretch; gap: 14px; }
+  .rail { flex: 0 0 100px; display: flex; flex-direction: column; justify-content: center; }
+  .rail .en { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: #64748b; }
+  .rail .ko { font-size: 13px; font-weight: 700; color: #334155; margin-top: 2px; }
+  .down { color: #94a3b8; font-size: 15px; padding: 4px 0; margin-left: 114px; }
+
+  .box { flex: 1; border: 1.5px solid #e3e8f0; border-radius: 14px; background: #fbfcfe; padding: 12px 14px;
+         display: flex; gap: 10px; align-items: stretch; }
+  .card { flex: 1; background: #fff; border: 1.5px solid #cdd6e2; border-radius: 10px; padding: 9px 12px; color: #334155; }
+  .card .n { font-size: 14.5px; font-weight: 800; }
+  .card .s { font-size: 11.5px; color: #6b7280; margin-top: 4px; line-height: 1.45; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 11px; background: #f1f5f9; border-radius: 4px; padding: 0 3px; }
+
+  .ctrl  { background: #f8fafc; }
+  .agent { background: #e7f5ee; border-color: #a7d7bd; }
+  .agent .card { border-color: #b7dfc9; }
+  .flow { font-size: 13px; font-weight: 700; color: #0f5132; line-height: 1.7; }
+  .flow .k { display: inline-block; background: #fff; border: 1.5px solid #9fd0b4; border-radius: 7px; padding: 0 7px; margin: 0 2px; }
+  .flow .h { border-color: #f0b35b; background: #fff7e6; color: #8a4b00; }
+  .mcp   { background: #eef2ff; border-color: #c7d2fe; }
+  .proxy { background: #fff1f2; border-color: #fecdd3; }
+  .proxy .card { border-color: #fda4af; color: #9f1239; }
+  .api   { background: #f8fafc; }
+  .note { font-size: 11.5px; color: #64748b; margin-top: 16px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="diagram">
+  <div class="title"><b>vendor-check-agent</b> · 툴 → 실패 주입 프록시 → 기관 API, 그 위의 두 시스템</div>
+
+  <div class="layer">
+    <div class="rail"><div class="en">RUNNER</div><div class="ko">실험 러너</div></div>
+    <div class="box ctrl">
+      <div class="card"><div class="n">시스템 × 복구 전략 × 실패 시나리오 × 회사</div>
+        <div class="s">점검 한 건마다 프록시 규칙을 새로 걸고 결과를 <code>reports/runs/*.jsonl</code> 에 한 줄씩 남김. 한도 초과는 <code>reset_quota()</code> 로 "다음 날"을 만든 뒤 재개(에이전트) 또는 재실행(대조군)</div></div>
+    </div>
+  </div>
+  <div class="down">▼</div>
+
+  <div class="layer">
+    <div class="rail"><div class="en">SYSTEMS</div><div class="ko">비교 대상</div></div>
+    <div class="box">
+      <div class="card" style="flex:0 0 250px"><div class="n">대조군 · 고정 파이프라인</div>
+        <div class="s">금융위 검색 → 국세청 → OpenDART 순서 고정. 동명 법인이면 첫 후보, 세 기관 모두 호출</div></div>
+      <div class="box agent" style="padding:10px 12px; display:block">
+        <div class="n" style="font-size:14.5px;font-weight:800;color:#0f5132;margin-bottom:6px">LangGraph 에이전트</div>
+        <div class="flow">
+          <span class="k">resolve</span> →
+          <span class="k h">confirm · interrupt</span>(동명 2곳 이상) →
+          <span class="k">nts</span> ∥ <span class="k">dart</span>(상장·DART 등록만) →
+          <span class="k">report · LLM</span>
+        </div>
+        <div class="s" style="font-size:11.5px;color:#3f6b55;margin-top:6px">한도 초과 → 노드에서 interrupt, 체크포인터(SQLite)에 상태 저장 → 재개 시 멈춘 노드만 다시 호출</div>
+      </div>
+    </div>
+  </div>
+  <div class="down">▼ 같은 복구 코드 <code>recovery.py</code> · none / retry / fallback / checkpoint</div>
+
+  <div class="layer">
+    <div class="rail"><div class="en">MCP</div><div class="ko">기관별 툴</div></div>
+    <div class="box mcp">
+      <div class="card"><div class="n">search_corp · fsc_outline</div><div class="s">금융위 기업개요</div></div>
+      <div class="card"><div class="n">business_status</div><div class="s">국세청 상태조회</div></div>
+      <div class="card"><div class="n">dart_find_corp · dart_company</div><div class="s">OpenDART 고유번호·기업개황</div></div>
+      <div class="card" style="flex:1.2"><div class="n">실패 = 데이터</div><div class="s"><code>{"ok": false, "error": {"kind", "code", "retryable"}}</code></div></div>
+    </div>
+  </div>
+  <div class="down">▼</div>
+
+  <div class="layer">
+    <div class="rail"><div class="en">PROXY</div><div class="ko">실패 주입</div></div>
+    <div class="box proxy">
+      <div class="card"><div class="n">timeout</div></div>
+      <div class="card"><div class="n">http_5xx</div></div>
+      <div class="card"><div class="n">error_200</div><div class="s">200 + 오류 본문</div></div>
+      <div class="card"><div class="n">quota</div><div class="s">초기화 전까지 실패</div></div>
+      <div class="card"><div class="n">malformed</div></div>
+      <div class="card"><div class="n">partial</div><div class="s">필수 필드 삭제</div></div>
+    </div>
+  </div>
+  <div class="down">▼</div>
+
+  <div class="layer">
+    <div class="rail"><div class="en">UPSTREAM</div><div class="ko">기관 API</div></div>
+    <div class="box api">
+      <div class="card"><div class="n">국세청</div><div class="s"><code>api.odcloud.kr</code></div></div>
+      <div class="card"><div class="n">금융위</div><div class="s"><code>apis.data.go.kr</code></div></div>
+      <div class="card"><div class="n">OpenDART</div><div class="s"><code>opendart.fss.or.kr</code></div></div>
+      <div class="card" style="border-style:dashed"><div class="n">가짜 업스트림</div><div class="s">테스트 전용, 합성 데이터</div></div>
+    </div>
+  </div>
+
+  <div class="note">strict 모드는 HTTP 상태와 무관하게 본문(게이트웨이 봉투·DART status·필수 필드)으로 실패를 판별하고, lenient 모드는 HTTP 상태만 확인합니다.</div>
+</div>
+</body>
+</html>
