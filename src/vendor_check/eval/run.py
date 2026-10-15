@@ -75,12 +75,13 @@ async def run_one(stack: Stack, system: str, strategy: Strategy, scenario: Scena
         approver = baseline_approver
         approve = approver_for(truth) if approver == "truth" else None
         out = await run_baseline(stack.gateway, query, strategy, policy, approve)
+        hitl = out.get("hitl", 0)
         if out["status"] == "interrupted":
             interrupted = True
             proxy.reset_quota()
             out = await run_baseline(stack.gateway, query, strategy, policy, approve)  # 처음부터 다시
+            hitl += out.get("hitl", 0)  # 처음부터 다시 돌면 확인도 다시 묻는다
         usage = []
-        hitl = out.get("hitl", 0)
     else:
         approver = "truth"
         graph = build_graph(stack.gateway, writer, strategy, policy, checkpointer)

@@ -129,9 +129,11 @@ async def run_baseline(gateway: ToolGateway, query: dict, strategy: Strategy,
             sources["fsc"] = None
         sources["nts"] = await steps.nts(entity.get("bzno") if entity else None)
         if "dart" not in sources:
-            # 확인을 거친 법인이면 DART 기록도 그 법인으로 맞춘다(에이전트와 같음)
-            match = entity.get("crno") if hitl and entity else None
-            sources["dart"] = await steps.dart(query["corp_name"], match_crno=match)
+            name, match = query["corp_name"], None
+            if approver is not None and entity:
+                # 확인 단계를 쓰는 조건에서는 에이전트의 dart 노드처럼 고른 법인의 상호·법인등록번호로 찾는다
+                name, match = entity.get("corp_name") or name, entity.get("crno")
+            sources["dart"] = await steps.dart(name, match_crno=match)
     except QuotaHit as e:
         return {"status": "interrupted", "interrupt": {"type": "quota", "tool": e.tool},
                 "report": None, "calls": steps.calls, "entity": entity, "hitl": hitl}

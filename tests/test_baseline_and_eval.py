@@ -65,6 +65,25 @@ async def test_baseline_confirm_matches_dart_record_to_chosen_entity(make_stack,
     assert all(correct for _, _, correct in field_outcomes(confirmed, truth_of(c)["fields"]))
 
 
+async def test_baseline_confirm_looks_up_dart_like_agent(make_stack, companies, monkeypatch):
+    from vendor_check import pipeline
+
+    seen = []
+    original = pipeline.Steps.dart
+
+    async def spy(self, corp_name, match_crno=None):
+        seen.append((corp_name, match_crno))
+        return await original(self, corp_name, match_crno)
+
+    monkeypatch.setattr(pipeline.Steps, "dart", spy)
+    c = by_id(companies, "syn-01")  # 동명 법인이 아니어도 확인 조건이면 법인등록번호로 맞춘다
+    async with make_stack() as stack:
+        await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE)
+        await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE,
+                           approver=approver_for(truth_of(c)))
+    assert seen == [(c["corp_name"], None), (c["corp_name"], c["crno"])]
+
+
 async def test_baseline_approver_not_asked_for_single_candidate(make_stack, companies):
     c = by_id(companies, "syn-01")
 
@@ -165,6 +184,16 @@ async def test_run_matrix_baseline_confirm_is_counted_separately(make_stack, com
     # 같은 확인 단계를 주면 무주입 합성 데이터에서는 대조군도 에이전트와 같아진다
     assert overall["baseline+confirm"] == overall["agent"]
     assert overall["baseline"]["item_agreement"] < overall["baseline+confirm"]["item_agreement"]
+
+
+async def test_baseline_confirm_counts_questions_across_quota_restart(make_stack, companies):
+    truths = [truth_of(by_id(companies, "syn-02b"))]
+    async with make_stack() as stack:
+        records = await run_matrix(stack, truths, ["baseline"], [Strategy.CHECKPOINT],
+                                   select(["nts-quota"]), StubReportWriter(), InMemorySaver(),
+                                   policy=FAST, baseline_approver="truth")
+    assert records[0]["interrupted"] and records[0]["status"] == "done"
+    assert records[0]["hitl"] == 2  # 처음부터 다시 돌아 동명 법인 확인을 두 번 묻는다
 
 
 def test_summarize_counts_silent_wrong_values():
