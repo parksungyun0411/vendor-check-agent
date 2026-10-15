@@ -4,7 +4,13 @@
 proxy.reset_quota() 로 "다음 날"을 만들고, 에이전트는 체크포인트에서 재개, 대조군은 처음부터
 다시 돈다.
 
+동명 법인 확인은 에이전트만 받는다(정답 승인자). --baseline-approver truth 를 주면 대조군도 같은
+승인자로 법인을 고르고, 기록은 baseline+confirm 으로 따로 집계된다. 두 대조군을 함께 보면 확인
+단계의 효과와 그래프 구조의 효과를 나눠 볼 수 있다.
+
     python -m vendor_check.eval.run --systems baseline agent --out reports/runs/run.jsonl
+    python -m vendor_check.eval.run --systems baseline --baseline-approver truth \
+        --out reports/runs/baseline-confirm.jsonl
 """
 
 from __future__ import annotations
@@ -35,7 +41,10 @@ def load_truth(path: Path) -> dict[str, dict]:
 
 
 def approver_for(truth: dict):
-    """동명 법인 확인을 사람 대신 정답의 사업자번호로 답한다(평가용)."""
+    """동명 법인 확인을 사람 대신 정답의 사업자번호로 답한다(평가용).
+
+    에이전트는 항상, 대조군은 --baseline-approver truth 일 때 이 승인자를 쓴다.
+    """
 
     def approve(query: dict, candidates: list[dict]) -> str:
         for key in ("bzno", "crno"):
@@ -54,7 +63,7 @@ def _delta(after: Counter, before: dict) -> dict:
 
 async def run_one(stack: Stack, system: str, strategy: Strategy, scenario: Scenario, truth: dict,
                   writer: ReportWriter, checkpointer, run_id: str,
-                  policy: RetryPolicy | None = None) -> dict:
+                  policy: RetryPolicy | None = None, baseline_approver: str = "first") -> dict:
     proxy = stack.proxy
     proxy.set_rules(scenario.rules(stack.settings.timeout_s))
     received0, forwarded0 = dict(proxy.received), dict(proxy.forwarded)
@@ -63,14 +72,17 @@ async def run_one(stack: Stack, system: str, strategy: Strategy, scenario: Scena
     interrupted = False
 
     if system == "baseline":
-        out = await run_baseline(stack.gateway, query, strategy, policy)
+        approver = baseline_approver
+        approve = approver_for(truth) if approver == "truth" else None
+        out = await run_baseline(stack.gateway, query, strategy, policy, approve)
         if out["status"] == "interrupted":
             interrupted = True
             proxy.reset_quota()
-            out = await run_baseline(stack.gateway, query, strategy, policy)  # 처음부터 다시
+            out = await run_baseline(stack.gateway, query, strategy, policy, approve)  # 처음부터 다시
         usage = []
-        hitl = 0
+        hitl = out.get("hitl", 0)
     else:
+        approver = "truth"
         graph = build_graph(stack.gateway, writer, strategy, policy, checkpointer)
         thread_id = f"{run_id}:{scenario.name}:{strategy}:{truth['id']}"
         approve = approver_for(truth)
@@ -87,7 +99,7 @@ async def run_one(stack: Stack, system: str, strategy: Strategy, scenario: Scena
         "scenario": scenario.name, "scenario_agency": scenario.agency,
         "scenario_kind": scenario.kind, "scenario_mode": scenario.mode,
         "company_id": truth["id"], "status": out["status"], "interrupted": interrupted,
-        "report": out.get("report"), "hitl": hitl,
+        "report": out.get("report"), "hitl": hitl, "approver": approver,
         "received": _delta(proxy.received, received0),
         "forwarded": _delta(proxy.forwarded, forwarded0),
         "input_tokens": sum(u["input_tokens"] for u in usage),
@@ -100,7 +112,7 @@ async def run_one(stack: Stack, system: str, strategy: Strategy, scenario: Scena
 async def run_matrix(stack: Stack, truths: list[dict], systems: list[str],
                      strategies: list[Strategy], scenarios: list[Scenario], writer: ReportWriter,
                      checkpointer, out_path: Path | None = None,
-                     policy: RetryPolicy | None = None) -> list[dict]:
+                     policy: RetryPolicy | None = None, baseline_approver: str = "first") -> list[dict]:
     run_id = uuid.uuid4().hex[:8]
     records = []
     sink = out_path.open("a", encoding="utf-8") if out_path else None
@@ -110,7 +122,7 @@ async def run_matrix(stack: Stack, truths: list[dict], systems: list[str],
                 for system in systems:
                     for truth in truths:
                         rec = await run_one(stack, system, strategy, scenario, truth, writer,
-                                            checkpointer, run_id, policy)
+                                            checkpointer, run_id, policy, baseline_approver)
                         records.append(rec)
                         if sink:
                             sink.write(json.dumps(rec, ensure_ascii=False) + "\n")
@@ -140,6 +152,7 @@ async def _main(args: argparse.Namespace) -> None:
         records = await run_matrix(
             stack, truths, args.systems, [Strategy(s) for s in args.strategies],
             select(args.scenarios), build_writer(settings), saver, out,
+            baseline_approver=args.baseline_approver,
         )
     print(f"{len(records)} records → {out}")
 
@@ -152,6 +165,8 @@ def main() -> None:
                    choices=["baseline", "agent"])
     p.add_argument("--strategies", nargs="+", default=[s.value for s in Strategy])
     p.add_argument("--scenarios", nargs="*", help="생략하면 전체 시나리오")
+    p.add_argument("--baseline-approver", choices=["first", "truth"], default="first",
+                   help="대조군의 동명 법인 선택. first=첫 후보(기본), truth=에이전트와 같은 정답 승인자")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", default="reports/runs/run.jsonl")
     asyncio.run(_main(p.parse_args()))

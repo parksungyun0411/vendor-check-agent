@@ -9,7 +9,7 @@ from tests.conftest import by_id
 from vendor_check.eval.groundtruth import build_truth
 from vendor_check.eval.metrics import field_outcomes, percentile, summarize
 from vendor_check.eval.report import PENDING, render
-from vendor_check.eval.run import run_matrix
+from vendor_check.eval.run import approver_for, run_matrix
 from vendor_check.eval.scenarios import all_scenarios, select
 from vendor_check.llm import StubReportWriter
 from vendor_check.pipeline import run_baseline
@@ -41,6 +41,40 @@ async def test_baseline_picks_first_same_name_candidate(make_stack, companies):
     async with make_stack() as stack:
         out = await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE)
     assert out["report"]["crno"]["value"] == "0000000000021"  # 사람 확인이 없어 다른 법인
+
+
+async def test_baseline_with_truth_approver_confirms_same_name_entity(make_stack, companies):
+    c = by_id(companies, "syn-02b")
+    async with make_stack() as stack:
+        out = await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE,
+                                 approver=approver_for(truth_of(c)))
+    assert out["hitl"] == 1
+    assert all(correct for _, _, correct in field_outcomes(out, truth_of(c)["fields"]))
+
+
+async def test_baseline_confirm_matches_dart_record_to_chosen_entity(make_stack, companies):
+    c = by_id(companies, "syn-02a")  # 비상장. DART 에는 동명의 syn-02b 만 있다
+    query = {"corp_name": c["corp_name"]}
+    async with make_stack() as stack:
+        first = await run_baseline(stack.gateway, query, Strategy.NONE)
+        confirmed = await run_baseline(stack.gateway, query, Strategy.NONE,
+                                       approver=approver_for(truth_of(c)))
+    # 첫 후보를 쓰면 DART 를 이름으로만 찾아 동명 상장사의 상장 구분을 가져온다
+    assert first["report"]["market"]["value"] == "KOSDAQ"
+    assert confirmed["report"]["market"]["value"] == "NONE"
+    assert all(correct for _, _, correct in field_outcomes(confirmed, truth_of(c)["fields"]))
+
+
+async def test_baseline_approver_not_asked_for_single_candidate(make_stack, companies):
+    c = by_id(companies, "syn-01")
+
+    def never(query, candidates):
+        raise AssertionError("동명 법인이 아니면 확인하지 않는다")
+
+    async with make_stack() as stack:
+        out = await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE,
+                                 approver=never)
+    assert out["hitl"] == 0 and out["status"] == "done"
 
 
 async def test_baseline_checkpoint_strategy_stops_on_quota(make_stack, companies):
@@ -110,6 +144,27 @@ async def test_run_matrix_records_and_resume(make_stack, companies):
                       if g["system"] == "agent" and g["strategy"] == "checkpoint"
                       and g["fault_kind"] == "quota")
     assert agent_ckpt["interrupted"] == 2 and agent_ckpt["resume_success"] == 1.0
+
+
+async def test_run_matrix_baseline_confirm_is_counted_separately(make_stack, companies):
+    truths = [truth_of(by_id(companies, i)) for i in ("syn-01", "syn-02a", "syn-02b")]
+    scenarios = select(["clean"])
+    async with make_stack() as stack:
+        first = await run_matrix(stack, truths, ["baseline"], [Strategy.NONE], scenarios,
+                                 StubReportWriter(), InMemorySaver(), policy=FAST)
+        confirm = await run_matrix(stack, truths, ["baseline"], [Strategy.NONE], scenarios,
+                                   StubReportWriter(), InMemorySaver(), policy=FAST,
+                                   baseline_approver="truth")
+        agent = await run_matrix(stack, truths, ["agent"], [Strategy.NONE], scenarios,
+                                 StubReportWriter(), InMemorySaver(), policy=FAST)
+    assert {r["approver"] for r in first} == {"first"}
+    assert {r["approver"] for r in confirm + agent} == {"truth"}
+    assert [r["hitl"] for r in confirm] == [0, 1, 1]
+    overall = summarize(first + confirm + agent, {t["id"]: t for t in truths})["overall"]
+    assert set(overall) == {"baseline", "baseline+confirm", "agent"}
+    # 같은 확인 단계를 주면 무주입 합성 데이터에서는 대조군도 에이전트와 같아진다
+    assert overall["baseline+confirm"] == overall["agent"]
+    assert overall["baseline"]["item_agreement"] < overall["baseline+confirm"]["item_agreement"]
 
 
 def test_summarize_counts_silent_wrong_values():

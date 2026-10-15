@@ -3,7 +3,7 @@ COMPANIES ?= data/companies.csv
 TRUTH ?= data/ground_truth.jsonl
 LIMIT ?= 0
 
-.PHONY: install mcp proxy groundtruth baseline agent inject eval report check test lint
+.PHONY: install mcp proxy groundtruth baseline agent inject inject-confirm eval report check test lint
 
 install:
 	uv sync --extra dev --extra llm
@@ -27,6 +27,10 @@ agent:  ## LangGraph 에이전트, 실패 주입 없음
 
 inject:  ## 실패 시나리오 전체 × 복구 전략 4종 × 두 시스템
 	$(PY) -m vendor_check.eval.run --truth $(TRUTH) --limit $(LIMIT) --out reports/runs/inject.jsonl
+
+inject-confirm:  ## 같은 행렬을 동명 법인 확인을 준 대조군으로 (baseline+confirm 으로 집계)
+	$(PY) -m vendor_check.eval.run --truth $(TRUTH) --systems baseline --baseline-approver truth \
+		--limit $(LIMIT) --out reports/runs/inject-confirm.jsonl
 
 eval:  ## reports/runs/*.jsonl → reports/metrics.json → reports/RESULTS.md
 	$(PY) -m vendor_check.eval.report metrics --truth $(TRUTH)

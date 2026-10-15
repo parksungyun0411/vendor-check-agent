@@ -6,6 +6,8 @@
 - 재개 성공률: 한도 초과로 멈춘 기록 중, 재개 후 점검 성공한 비율
 - 조용한 오답 비율: status=ok 로 보고한 항목 중 값이 정답과 다른 비율
 - 건당 토큰·비용·p95 지연
+
+시스템은 baseline(첫 후보), baseline+confirm(에이전트와 같은 동명 법인 확인), agent 로 나눠 센다.
 """
 
 from __future__ import annotations
@@ -38,6 +40,13 @@ def field_outcomes(record: dict, truth: dict) -> list[tuple[str, bool, bool]]:
     return out
 
 
+def system_label(record: dict) -> str:
+    """대조군에 에이전트와 같은 동명 법인 확인을 준 기록은 따로 집계한다."""
+    if record["system"] == "baseline" and record.get("approver") == "truth":
+        return "baseline+confirm"
+    return record["system"]
+
+
 def percentile(values: list[float], q: float) -> float | None:
     if not values:
         return None
@@ -61,7 +70,8 @@ def summarize(records: Iterable[dict], truth: dict[str, dict],
         if r["company_id"] not in truth:
             continue
         gt = truth[r["company_id"]]["fields"]
-        key = (r["system"], r["strategy"], r["scenario_kind"] or "clean", r["scenario_mode"] or "-")
+        system = system_label(r)
+        key = (system, r["strategy"], r["scenario_kind"] or "clean", r["scenario_mode"] or "-")
         g = groups[key]
         outcomes = field_outcomes(r, gt)
         g["checks"] += 1
@@ -76,7 +86,7 @@ def summarize(records: Iterable[dict], truth: dict[str, dict],
             g["resumed_ok"] += full
         latency[key].append(r["elapsed_s"])
         tokens[key].append((r.get("input_tokens", 0), r.get("output_tokens", 0)))
-        s = by_system[r["system"]]
+        s = by_system[system]
         s["fields"] += len(outcomes)
         s["agree"] += sum(c for _, _, c in outcomes)
         s["reported_ok"] += sum(ok for _, ok, _ in outcomes)

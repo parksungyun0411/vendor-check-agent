@@ -25,7 +25,7 @@ from langgraph.types import Command, Send, interrupt
 
 from vendor_check.gateway import ToolGateway
 from vendor_check.llm import ReportWriter
-from vendor_check.pipeline import QuotaHit, Steps, fsc_values
+from vendor_check.pipeline import Approver, QuotaHit, Steps, fsc_values
 from vendor_check.recovery import RetryPolicy, Strategy, draft_report
 
 LISTED = {"KOSPI", "KOSDAQ", "KONEX"}
@@ -157,9 +157,6 @@ def build_graph(gateway: ToolGateway, writer: ReportWriter, strategy: Strategy,
     g.add_edge("dart", "report")
     g.add_edge("report", END)
     return g.compile(checkpointer=checkpointer)
-
-
-Approver = Callable[[dict, list[dict]], str]
 
 
 async def drive(graph, thread_id: str, approver: Approver, query: dict | None = None,

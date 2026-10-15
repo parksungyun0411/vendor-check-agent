@@ -1,10 +1,13 @@
 """대조군: 고정 순서 파이프라인 (금융위 검색 → 국세청 → OpenDART).
 
-동명 법인이 여러 개면 첫 후보를 고른다(사람 확인 없음). 상장 여부와 관계없이 세 기관을 모두
-부른다. 에이전트와 같은 툴·복구 전략·병합 함수를 써서, 차이가 그래프 구조에서만 나오게 했다.
+동명 법인이 여러 개면 기본은 첫 후보를 고른다(사람 확인 없음). approver 를 주면 에이전트와 같은
+확인 단계를 거쳐 고른 법인으로 조회하고, DART 기록도 그 법인의 법인등록번호로 맞춘다. 상장 여부와
+관계없이 세 기관을 모두 부른다. 에이전트와 같은 툴·복구 전략·병합 함수를 쓴다.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from vendor_check.gateway import ToolGateway
 from vendor_check.recovery import (
@@ -17,6 +20,9 @@ from vendor_check.recovery import (
 )
 
 CORP_FIELDS = ("corp_name", "ceo_name", "crno", "bzno", "market")
+
+# 동명 법인 확인: (질의, 후보 목록) → 고른 법인등록번호
+Approver = Callable[[dict, list[dict]], str]
 
 
 class QuotaHit(Exception):
@@ -96,27 +102,38 @@ def fsc_values(search_ok: bool, entity: dict | None) -> dict | None:
     return {f: entity.get(f) for f in CORP_FIELDS}
 
 
+def choose(query: dict, cands: list[dict], approver: Approver | None) -> tuple[dict | None, int]:
+    """(고른 법인, 확인 요청 수). 동명 법인이 아니거나 approver 가 없으면 첫 후보."""
+    if approver is None or len(cands) < 2:
+        return cands[0], 0
+    crno = approver(query, cands)
+    return next((c for c in cands if c.get("crno") == crno), None), 1
+
+
 async def run_baseline(gateway: ToolGateway, query: dict, strategy: Strategy,
-                       policy: RetryPolicy | None = None) -> dict:
+                       policy: RetryPolicy | None = None, approver: Approver | None = None) -> dict:
     steps = Steps(gateway, strategy, policy)
     sources: dict[str, dict | None] = {}
     entity = None
+    hitl = 0
     try:
         fsc_cands, dart_cands = await steps.search(query["corp_name"])
         if fsc_cands is not None:
-            entity = fsc_cands[0] if fsc_cands else None
+            entity, hitl = choose(query, fsc_cands, approver) if fsc_cands else (None, 0)
             sources["fsc"] = fsc_values(True, entity)
         elif dart_cands:
-            entity = dart_cands[0]
+            entity, hitl = choose(query, dart_cands, approver)
             sources["fsc"] = None
             sources["dart"] = entity
         else:
             sources["fsc"] = None
         sources["nts"] = await steps.nts(entity.get("bzno") if entity else None)
         if "dart" not in sources:
-            sources["dart"] = await steps.dart(query["corp_name"])
+            # 확인을 거친 법인이면 DART 기록도 그 법인으로 맞춘다(에이전트와 같음)
+            match = entity.get("crno") if hitl and entity else None
+            sources["dart"] = await steps.dart(query["corp_name"], match_crno=match)
     except QuotaHit as e:
         return {"status": "interrupted", "interrupt": {"type": "quota", "tool": e.tool},
-                "report": None, "calls": steps.calls, "entity": entity}
+                "report": None, "calls": steps.calls, "entity": entity, "hitl": hitl}
     return {"status": "done", "report": draft_report(sources, strategy),
-            "calls": steps.calls, "entity": entity}
+            "calls": steps.calls, "entity": entity, "hitl": hitl}
