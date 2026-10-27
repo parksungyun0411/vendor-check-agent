@@ -128,7 +128,8 @@ def build_graph(gateway: ToolGateway, writer: ReportWriter, strategy: Strategy,
         s = steps()
         entity = state["entity"]
         name = entity.get("corp_name") or state["query"]["corp_name"]
-        values = await _guarded(lambda: s.dart(name, match_crno=entity.get("crno")))
+        values = await _guarded(lambda: s.dart(name, match_crno=entity.get("crno"),
+                                               corp_code=entity.get("fss_corp_code")))
         return {"sources": {"dart": values}, "calls": s.calls}
 
     async def report(state: CheckState) -> dict:

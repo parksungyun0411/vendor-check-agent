@@ -40,7 +40,8 @@ async def build_truth(gateway: ToolGateway, row: dict) -> dict:
     sources = {
         "fsc": fsc_values(True, entity),
         "nts": await steps.nts(entity["bzno"]),
-        "dart": await steps.dart(entity["corp_name"], match_crno=entity.get("crno")),
+        "dart": await steps.dart(entity["corp_name"], match_crno=entity.get("crno"),
+                                 corp_code=entity.get("fss_corp_code")),
     }
     failed = [a for a, v in sources.items() if v is None]
     if failed:

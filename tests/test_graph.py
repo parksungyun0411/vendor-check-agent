@@ -45,6 +45,25 @@ async def test_single_listed_company_queries_nts_and_dart(make_stack, companies)
     assert {call["tool"] for call in out["calls"]} >= {"business_status", "dart_company"}
 
 
+async def test_listed_company_found_in_dart_despite_legal_form_in_fsc_name(make_stack, companies):
+    c = by_id(companies, "syn-04")  # 금융위 '(주)가상상장전자', DART 목록 '가상상장전자'
+    async with make_stack() as stack:
+        graph = build_graph(stack.gateway, StubReportWriter(), Strategy.NONE, FAST, InMemorySaver())
+        out = await drive(graph, "t1b", never, query={"corp_name": c["corp_name"]})
+        received = stack.proxy.stats()["received"]
+    assert received["dart"] >= 1
+    assert out["report"]["market"] == {"value": "KOSDAQ", "status": "ok", "source": "dart"}
+
+
+async def test_dart_looked_up_by_fss_code_when_names_differ(make_stack, companies):
+    c = by_id(companies, "syn-05")  # 금융위 '가상단조공업(주)', DART 목록 '가상단조'. 이름으로는 못 찾는다
+    async with make_stack() as stack:
+        graph = build_graph(stack.gateway, StubReportWriter(), Strategy.NONE, FAST, InMemorySaver())
+        out = await drive(graph, "t1c", never, query={"corp_name": c["corp_name"]})
+    assert out["report"]["market"] == {"value": "KOSDAQ", "status": "ok", "source": "dart"}
+    assert "dart_find_corp" not in {call["tool"] for call in out["calls"]}
+
+
 async def test_unlisted_company_without_dart_code_skips_dart(make_stack, companies):
     c = by_id(companies, "syn-03")
     async with make_stack() as stack:

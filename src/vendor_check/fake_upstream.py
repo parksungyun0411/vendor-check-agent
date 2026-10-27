@@ -50,10 +50,12 @@ def build_fake_upstream(companies: list[dict]) -> Starlette:
 
     async def fsc_outline(request: Request) -> Response:
         q = request.query_params
+        # 실제 금융위처럼 상호 부분 일치로 찾고, 법인명은 fsc_name('(주)가나')이 있으면 그것을 준다
         rows = [c for c in companies
-                if (q.get("corpNm") and c["corp_name"] == q["corpNm"])
+                if (q.get("corpNm") and q["corpNm"] in c.get("fsc_name", c["corp_name"]))
                 or (q.get("crno") and c["crno"] == q["crno"])]
-        items = [{"crno": c["crno"], "corpNm": c["corp_name"], "enpRprFnm": c["ceo_name"],
+        items = [{"crno": c["crno"], "corpNm": c.get("fsc_name", c["corp_name"]),
+                  "enpRprFnm": c["ceo_name"],
                   "bzno": c["bzno"], "corpRegMrktDcdNm": MARKET_NAME[c["market"]],
                   "fssCorpUnqNo": c.get("corp_code") or "", "fssCorpChgDtm": "20260101000000"}
                  for c in rows]

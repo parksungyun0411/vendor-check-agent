@@ -3,17 +3,28 @@
 여기서 나오는 숫자는 합성 데이터에 대한 테스트 단언이며 프로젝트 결과가 아니다.
 """
 
+import json
+
+import httpx
+import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from tests.conftest import by_id
 from vendor_check.eval.groundtruth import build_truth
 from vendor_check.eval.metrics import field_outcomes, percentile, summarize
-from vendor_check.eval.report import PENDING, render
-from vendor_check.eval.run import approver_for, run_matrix
+from vendor_check.eval.report import PENDING, compute, render
+from vendor_check.eval.run import (
+    CallLedger,
+    UpstreamLimit,
+    approver_for,
+    done_keys,
+    parse_budget,
+    run_matrix,
+)
 from vendor_check.eval.scenarios import all_scenarios, select
 from vendor_check.llm import StubReportWriter
 from vendor_check.pipeline import run_baseline
-from vendor_check.proxy import FaultRule
+from vendor_check.proxy import FaultRule, real_limit
 from vendor_check.recovery import FIELDS, RetryPolicy, Strategy, draft_report
 
 FAST = RetryPolicy(max_attempts=3, base_delay_s=0)
@@ -71,9 +82,9 @@ async def test_baseline_confirm_looks_up_dart_like_agent(make_stack, companies, 
     seen = []
     original = pipeline.Steps.dart
 
-    async def spy(self, corp_name, match_crno=None):
-        seen.append((corp_name, match_crno))
-        return await original(self, corp_name, match_crno)
+    async def spy(self, corp_name, match_crno=None, corp_code=None):
+        seen.append((corp_name, match_crno, corp_code))
+        return await original(self, corp_name, match_crno, corp_code)
 
     monkeypatch.setattr(pipeline.Steps, "dart", spy)
     c = by_id(companies, "syn-01")  # 동명 법인이 아니어도 확인 조건이면 법인등록번호로 맞춘다
@@ -81,7 +92,7 @@ async def test_baseline_confirm_looks_up_dart_like_agent(make_stack, companies, 
         await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE)
         await run_baseline(stack.gateway, {"corp_name": c["corp_name"]}, Strategy.NONE,
                            approver=approver_for(truth_of(c)))
-    assert seen == [(c["corp_name"], None), (c["corp_name"], c["crno"])]
+    assert seen == [(c["corp_name"], None, None), (c["corp_name"], c["crno"], c["corp_code"])]
 
 
 async def test_baseline_approver_not_asked_for_single_candidate(make_stack, companies):
@@ -132,6 +143,24 @@ async def test_groundtruth_uses_bzno_to_pick_entity(make_stack, companies):
     assert rec["complete"] is True
     assert rec["fields"] == truth_of(c)["fields"]
     assert rec["n_candidates"] == 2
+
+
+async def test_groundtruth_finds_dart_record_despite_legal_form(make_stack, companies):
+    c = by_id(companies, "syn-04")  # 금융위 '(주)가상상장전자', DART 목록 '가상상장전자'
+    async with make_stack() as stack:
+        rec = await build_truth(stack.gateway, {"id": c["id"], "corp_name": c["corp_name"],
+                                                "bzno": c["bzno"]})
+    assert rec["complete"] is True
+    assert rec["fields"]["corp_name"] == c["fsc_name"]
+    assert rec["fields"]["market"] == "KOSDAQ"
+
+
+async def test_groundtruth_uses_fss_code_when_names_differ(make_stack, companies):
+    c = by_id(companies, "syn-05")
+    async with make_stack() as stack:
+        rec = await build_truth(stack.gateway, {"id": c["id"], "corp_name": c["corp_name"],
+                                                "bzno": c["bzno"]})
+    assert rec["complete"] is True and rec["fields"]["market"] == "KOSDAQ"
 
 
 async def test_groundtruth_marks_incomplete_on_failure(make_stack, companies):
@@ -224,3 +253,127 @@ def test_render_without_measurements_has_empty_table():
     md = render(None)
     assert PENDING in md
     assert "%" not in md
+
+
+async def test_run_matrix_skips_recorded_runs_on_rerun(make_stack, companies, tmp_path):
+    truths = [truth_of(by_id(companies, i)) for i in ("syn-01", "syn-02b")]
+    out = tmp_path / "runs.jsonl"
+    async with make_stack() as stack:
+        first = await run_matrix(stack, truths, ["baseline", "agent"], [Strategy.NONE],
+                                 select(["clean"]), StubReportWriter(), InMemorySaver(), out, FAST)
+        again = await run_matrix(stack, truths, ["baseline", "agent"], [Strategy.NONE],
+                                 select(["clean"]), StubReportWriter(), InMemorySaver(), out, FAST)
+        confirm = await run_matrix(stack, truths, ["baseline"], [Strategy.NONE], select(["clean"]),
+                                   StubReportWriter(), InMemorySaver(), out, FAST,
+                                   baseline_approver="truth")
+    assert len(first) == 4 and again == [] and len(confirm) == 2
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 6
+
+
+def test_done_keys_drops_half_written_last_line(tmp_path):
+    out = tmp_path / "runs.jsonl"
+    rec = {"system": "agent", "strategy": "none", "scenario": "clean", "company_id": "syn-01",
+           "approver": "truth"}
+    out.write_text(json.dumps(rec) + "\n" + '{"system": "agent", "strat', encoding="utf-8")
+    assert done_keys(out) == {("agent", "none", "clean", "syn-01", "truth")}
+    assert out.read_text(encoding="utf-8") == json.dumps(rec) + "\n"
+
+
+def test_done_keys_skips_blank_lines(tmp_path):
+    rec = {"system": "agent", "strategy": "none", "scenario": "clean", "company_id": "syn-01",
+           "approver": "truth"}
+    (tmp_path / "other.jsonl").write_text("\n" + json.dumps(rec) + "\n\n", encoding="utf-8")
+    assert done_keys(tmp_path / "runs.jsonl") == {("agent", "none", "clean", "syn-01", "truth")}
+
+
+def test_real_limit_detects_upstream_quota_only():
+    gateway = ("<OpenAPI_ServiceResponse><cmmMsgHeader>"
+               "<errMsg>LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR</errMsg>"
+               "<returnReasonCode>22</returnReasonCode></cmmMsgHeader></OpenAPI_ServiceResponse>")
+    assert real_limit("fsc", httpx.Response(200, text=gateway))
+    assert real_limit("nts", httpx.Response(429, text=""))
+    assert real_limit("dart", httpx.Response(200, json={"status": "020", "message": "요청 제한 초과"}))
+    assert real_limit("dart", httpx.Response(200, json={"status": "000"})) is None
+    assert real_limit("fsc", httpx.Response(200, json={"response": {"header": {"resultCode": "00"}}})) is None
+
+
+async def test_run_matrix_stops_without_recording_on_upstream_limit(make_stack, companies, tmp_path):
+    out = tmp_path / "runs.jsonl"
+    ledger = CallLedger(tmp_path / "calls.json", {"fsc": 100})
+    async with make_stack() as stack:
+        stack.proxy.upstream_limit, stack.proxy.limit_agency = "fsc: 공공데이터포털 한도 초과", "fsc"
+        with pytest.raises(UpstreamLimit):
+            await run_matrix(stack, [truth_of(by_id(companies, "syn-01"))], ["baseline"], [Strategy.NONE],
+                             select(["clean"]), StubReportWriter(), InMemorySaver(), out, FAST,
+                             ledger=ledger)
+    assert out.read_text(encoding="utf-8") == ""
+    # 버린 실행의 호출도 세고, 같은 날 다시 돌리면 바로 멈춘다
+    again = CallLedger(tmp_path / "calls.json", {"fsc": 100})
+    assert again.used["fsc"] >= 1 and again.exhausted() == ["fsc"]
+
+
+async def test_rerun_into_another_file_skips_runs_recorded_elsewhere(make_stack, companies, tmp_path):
+    truths = [truth_of(by_id(companies, "syn-01"))]
+    async with make_stack() as stack:
+        await run_matrix(stack, truths, ["baseline"], [Strategy.NONE], select(["clean"]),
+                         StubReportWriter(), InMemorySaver(), tmp_path / "baseline.jsonl", FAST)
+        inject = await run_matrix(stack, truths, ["baseline"], [Strategy.NONE, Strategy.RETRY],
+                                  select(["clean"]), StubReportWriter(), InMemorySaver(),
+                                  tmp_path / "inject.jsonl", FAST)
+    assert [r["strategy"] for r in inject] == ["retry"]
+
+
+def test_compute_counts_a_run_recorded_twice_once(companies, tmp_path):
+    truth = truth_of(by_id(companies, "syn-01"))
+    (tmp_path / "truth.jsonl").write_text(json.dumps(truth) + "\n", encoding="utf-8")
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    rec = {"system": "baseline", "strategy": "none", "scenario": "clean", "scenario_agency": None,
+           "scenario_kind": None, "scenario_mode": None, "company_id": "syn-01", "status": "done",
+           "interrupted": False, "report": None, "hitl": 0, "approver": "first", "received": {},
+           "forwarded": {}, "input_tokens": 0, "output_tokens": 0, "model": None, "elapsed_s": 1.0}
+    for name in ("a.jsonl", "b.jsonl"):
+        (runs / name).write_text(json.dumps(rec) + "\n", encoding="utf-8")
+    result = compute(runs, tmp_path / "truth.jsonl")
+    assert result["n_records"] == 1 and result["n_duplicates_dropped"] == 1
+
+
+def test_call_ledger_sums_across_instances(tmp_path):
+    path = tmp_path / "calls.json"
+    first = CallLedger(path, {"fsc": 3})
+    first.add({"fsc": 2, "nts": 1})
+    second = CallLedger(path, {"fsc": 3})
+    assert second.used["fsc"] == 2 and second.exhausted() == []
+    second.add({"fsc": 1})
+    assert second.exhausted() == ["fsc"]
+    assert parse_budget(["fsc=9000", "dart=19000"]) == {"fsc": 9000, "dart": 19000}
+
+
+def test_call_ledger_starts_fresh_on_a_new_day(tmp_path, monkeypatch):
+    import datetime as dt
+
+    from vendor_check.eval import run as run_mod
+
+    today = {"d": dt.date(2026, 1, 1)}
+    monkeypatch.setattr(run_mod, "date", type("D", (), {"today": staticmethod(lambda: today["d"])}))
+    ledger = CallLedger(tmp_path / "calls.json", {"fsc": 2})
+    ledger.add({"fsc": 2})
+    ledger.block("nts")
+    assert ledger.exhausted() == ["fsc", "nts"]
+    today["d"] = dt.date(2026, 1, 2)
+    assert ledger.exhausted() == []
+    ledger.add({"fsc": 1})
+    data = json.loads((tmp_path / "calls.json").read_text(encoding="utf-8"))
+    assert data == {"2026-01-01": {"fsc": 2, "blocked:nts": 1}, "2026-01-02": {"fsc": 1}}
+
+
+async def test_run_matrix_stops_when_daily_budget_is_used(make_stack, companies, tmp_path):
+    truths = [truth_of(by_id(companies, i)) for i in ("syn-01", "syn-02b")]
+    ledger = CallLedger(tmp_path / "calls.json", {"fsc": 1})
+    out = tmp_path / "runs.jsonl"
+    async with make_stack() as stack:
+        with pytest.raises(UpstreamLimit):
+            await run_matrix(stack, truths, ["baseline"], [Strategy.NONE], select(["clean"]),
+                             StubReportWriter(), InMemorySaver(), out, FAST, ledger=ledger)
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 1
+    assert ledger.used["fsc"] >= 1

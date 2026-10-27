@@ -1,6 +1,8 @@
 """프록시가 주입한 실패를 클라이언트가 어떻게 분류하는지 (strict) 와,
 본문 검사를 끈 lenient 가 어떤 실패를 정상으로 통과시키는지."""
 
+import asyncio
+
 import pytest
 
 from vendor_check.proxy import FaultRule
@@ -85,6 +87,24 @@ async def test_unregistered_bzno(make_stack):
     async with make_stack() as stack:
         r = await stack.gateway.call("business_status", {"bzno": "000-00-99999"})
     assert r["ok"] and r["data"]["registered"] is False
+
+
+async def test_injected_timeout_never_reaches_upstream(make_stack):
+    # 프록시가 같은 프로세스에서 돌아, 툴이 포기하면 프록시의 대기도 함께 취소된다. 그래서 한도를 쓰지 않는다
+    async with make_stack() as stack:
+        delay = stack.settings.timeout_s * 1.5
+        stack.proxy.set_rules([FaultRule("fsc", "timeout", delay_s=delay)])
+        r = await stack.gateway.call(*CALLS["fsc"])
+        await asyncio.sleep(delay)  # 지연이 끝난 뒤에도 늦게 부르지 않는다
+    assert r["ok"] is False and r["error"]["kind"] == "timeout"
+    assert stack.proxy.received["fsc"] == 1 and stack.proxy.forwarded["fsc"] == 0
+
+
+async def test_dart_find_corp_ignores_legal_form(make_stack):
+    async with make_stack() as stack:
+        for name in (f"(주){NAME}", f"{NAME} 주식회사", f"㈜ {NAME}"):
+            r = await stack.gateway.call("dart_find_corp", {"corp_name": name})
+            assert r["ok"] and [c["corp_code"] for c in r["data"]] == [CORP_CODE], name
 
 
 async def test_mcp_server_lists_agency_tools(make_stack):

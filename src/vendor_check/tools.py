@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -18,6 +19,12 @@ from vendor_check.config import Settings
 from vendor_check.errors import ToolFailure
 
 TOOL_NAMES = ("search_corp", "fsc_outline", "business_status", "dart_find_corp", "dart_company")
+LEGAL_FORM = re.compile(r"\(주\)|㈜|주식회사|\(유\)|유한회사|\s+")
+
+
+def corp_key(name: str | None) -> str:
+    """법인 형태 표기와 공백을 뗀 비교용 상호. 금융위는 '(주)가나', DART 목록은 '가나'처럼 적는다."""
+    return LEGAL_FORM.sub("", name or "")
 
 
 async def _wrap(fn: Callable[[], Awaitable[Any]]) -> dict[str, Any]:
@@ -36,6 +43,7 @@ class AgencyTools:
         self.fsc = FscClient(settings.fsc_base, settings.data_go_kr_key, **common)
         self.dart = DartClient(settings.dart_base, settings.dart_key, **common)
         self._corpcodes: list[dict] | None = None
+        self._by_key: dict[str, list[dict]] | None = None
 
     async def _corp_index(self) -> list[dict]:
         if self._corpcodes is None:
@@ -61,9 +69,15 @@ class AgencyTools:
         return await _wrap(run)
 
     async def dart_find_corp(self, corp_name: str) -> dict[str, Any]:
-        """OpenDART 고유번호 목록에서 정식 회사명이 같은 항목을 찾는다."""
+        """OpenDART 고유번호 목록에서 회사명이 같은 항목을 찾는다. (주)·주식회사 표기와 공백은 무시한다."""
         async def run():
-            return [c for c in await self._corp_index() if c["corp_name"] == corp_name]
+            if self._by_key is None:
+                index: dict[str, list[dict]] = {}
+                for c in await self._corp_index():
+                    index.setdefault(corp_key(c["corp_name"]), []).append(c)
+                self._by_key = index
+            key = corp_key(corp_name)
+            return list(self._by_key.get(key, [])) if key else []
         return await _wrap(run)
 
     async def dart_company(self, corp_code: str) -> dict[str, Any]:

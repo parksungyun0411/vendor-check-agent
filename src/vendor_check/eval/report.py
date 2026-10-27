@@ -14,7 +14,7 @@ from pathlib import Path
 
 from vendor_check.config import Settings
 from vendor_check.eval.metrics import summarize
-from vendor_check.eval.run import load_truth
+from vendor_check.eval.run import load_truth, run_key
 
 PENDING = "측정 전 — `make eval` 실행 후 자동 생성"
 
@@ -31,13 +31,23 @@ def compute(runs_dir: Path, truth_path: Path) -> dict | None:
     files = sorted(runs_dir.glob("*.jsonl")) if runs_dir.exists() else []
     if not files or not truth_path.exists():
         return None
-    records = [json.loads(line) for f in files
-               for line in f.read_text(encoding="utf-8").splitlines() if line]
+    records, seen, duplicates = [], set(), 0
+    for f in files:
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            r = json.loads(line)
+            if run_key(r) in seen:  # 같은 조건을 두 파일에 기록한 경우 처음 것만 센다
+                duplicates += 1
+                continue
+            seen.add(run_key(r))
+            records.append(r)
     settings = Settings.from_env()
     result = summarize(records, load_truth(truth_path),
                        settings.price_in_per_mtok, settings.price_out_per_mtok)
     result["sources"] = [str(f) for f in files]
     result["n_records"] = len(records)
+    result["n_duplicates_dropped"] = duplicates
     return result
 
 

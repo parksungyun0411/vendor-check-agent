@@ -75,8 +75,17 @@ class Steps:
         r = await self.call("business_status", {"bzno": bzno})
         return nts_values(r["data"]) if r["ok"] else None
 
-    async def dart(self, corp_name: str, match_crno: str | None = None) -> dict | None:
-        """DART 값. 고유번호 목록에 없으면 비상장으로 보고 market=NONE."""
+    async def dart(self, corp_name: str, match_crno: str | None = None,
+                   corp_code: str | None = None) -> dict | None:
+        """DART 값. 금융위가 준 금감원 고유번호(= DART 고유번호)가 있으면 그것으로 바로 찾는다.
+        상호로 찾으면 금융위 '한일단조공업(주)'와 DART '한일단조'처럼 이름이 달라 놓칠 수 있다.
+        고유번호 목록에 없으면 비상장으로 보고 market=NONE."""
+        if corp_code:
+            r = await self.call("dart_company", {"corp_code": corp_code})
+            if not r["ok"]:
+                return None
+            if r["data"] is not None and (match_crno is None or r["data"].get("crno") == match_crno):
+                return r["data"]
         found = await self.call("dart_find_corp", {"corp_name": corp_name})
         if not found["ok"]:
             return None
@@ -129,11 +138,12 @@ async def run_baseline(gateway: ToolGateway, query: dict, strategy: Strategy,
             sources["fsc"] = None
         sources["nts"] = await steps.nts(entity.get("bzno") if entity else None)
         if "dart" not in sources:
-            name, match = query["corp_name"], None
+            name, match, code = query["corp_name"], None, None
             if approver is not None and entity:
-                # 확인 단계를 쓰는 조건에서는 에이전트의 dart 노드처럼 고른 법인의 상호·법인등록번호로 찾는다
+                # 확인 조건에서는 에이전트의 dart 노드처럼 고른 법인의 고유번호·상호·법인등록번호로 찾는다
                 name, match = entity.get("corp_name") or name, entity.get("crno")
-            sources["dart"] = await steps.dart(name, match_crno=match)
+                code = entity.get("fss_corp_code")
+            sources["dart"] = await steps.dart(name, match_crno=match, corp_code=code)
     except QuotaHit as e:
         return {"status": "interrupted", "interrupt": {"type": "quota", "tool": e.tool},
                 "report": None, "calls": steps.calls, "entity": entity, "hitl": hitl}

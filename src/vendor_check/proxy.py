@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,20 @@ GATEWAY_ERR = {"01": "APPLICATION_ERROR", "05": "SERVICETIMEOUT_ERROR",
 DART_MSG = {"900": "정의되지 않은 오류가 발생하였습니다.", "020": "요청 제한을 초과하였습니다.",
             "800": "시스템 점검으로 인한 서비스가 중지 중입니다."}
 PARTIAL_DROP = {"nts": "b_stt_cd", "fsc": "corpNm", "dart": "corp_cls"}
+REAL_LIMIT_DART = re.compile(r'"status"\s*:\s*"020"|<status>020</status>')
+
+
+def real_limit(agency: str, resp: httpx.Response) -> str | None:
+    """업스트림이 실제로 돌려준 한도 초과 신호. 이 상태로 실험을 이어 가면 주입하지 않은 실패가
+    결과에 섞이므로, 러너가 보고 멈춘다. (주입한 quota 는 업스트림까지 가지 않아 여기 걸리지 않는다.)"""
+    if resp.status_code == 429:
+        return f"{agency}: HTTP 429"
+    text = resp.content[:4000].decode("utf-8", "ignore")
+    if "LIMITED_NUMBER_OF_SERVICE_REQUESTS" in text:
+        return f"{agency}: 공공데이터포털 한도 초과"
+    if agency == "dart" and REAL_LIMIT_DART.search(text):
+        return "dart: status 020"
+    return None
 
 
 @dataclass
@@ -86,6 +101,8 @@ class FaultProxy:
     received: Counter = field(default_factory=Counter)  # 프록시가 받은 호출
     forwarded: Counter = field(default_factory=Counter)  # 업스트림까지 간 호출
     injected: Counter = field(default_factory=Counter)  # (agency, kind) 별 주입 횟수
+    upstream_limit: str | None = None  # 실제 업스트림 한도 초과를 본 경우 그 내용
+    limit_agency: str | None = None  # 그 기관
 
     def set_rules(self, rules: list[FaultRule]) -> None:
         self.rules = rules
@@ -110,8 +127,11 @@ class FaultProxy:
         url = f"{self.upstreams[agency].rstrip('/')}/{path}"
         headers = {k: v for k, v in request.headers.items()
                    if k.lower() in ("content-type", "accept", "authorization")}
-        return await self.http.request(request.method, url, params=request.query_params,
+        resp = await self.http.request(request.method, url, params=request.query_params,
                                        content=await request.body(), headers=headers)
+        if self.upstream_limit is None and (hit := real_limit(agency, resp)):
+            self.upstream_limit, self.limit_agency = hit, agency
+        return resp
 
     def _error_body(self, agency: str, path: str, rule: FaultRule, quota: bool) -> Response:
         if agency == "dart":

@@ -1,0 +1,46 @@
+{
+ "seed": 42,
+ "drawn_on": "2026-10-26",
+ "corpcode_rows": 119737,
+ "quota": {
+  "listed": 30,
+  "unlisted": 30,
+  "closed": 20,
+  "dup": 20
+ },
+ "picked": {
+  "listed": 30,
+  "unlisted": 30,
+  "closed": 20,
+  "dup": 20
+ },
+ "pool_sizes": {
+  "listed": 3449,
+  "unlisted": 102799,
+  "dup": 5555
+ },
+ "tried": {
+  "listed": 50,
+  "unlisted": 53,
+  "dup": 74
+ },
+ "picked_from_pool": {
+  "closed<-listed": 6,
+  "closed<-unlisted": 14,
+  "dup<-dup": 20,
+  "listed<-listed": 30,
+  "unlisted<-unlisted": 30
+ },
+ "outcomes": {
+  "drop:fsc_no_match": 42,
+  "drop:fsc_not_homonym": 26,
+  "drop:not_listed": 5,
+  "drop:nts_failed": 1,
+  "drop:nts_unregistered": 2,
+  "ok:closed": 20,
+  "ok:dup": 20,
+  "ok:listed": 30,
+  "ok:unlisted": 30,
+  "skip:closed_full": 1
+ }
+}

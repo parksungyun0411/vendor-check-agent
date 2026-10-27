@@ -3,7 +3,7 @@ COMPANIES ?= data/companies.csv
 TRUTH ?= data/ground_truth.jsonl
 LIMIT ?= 0
 
-.PHONY: install mcp proxy groundtruth baseline agent inject inject-confirm eval report check test lint
+.PHONY: install mcp proxy companies groundtruth baseline agent inject inject-confirm daily eval report check test lint
 
 install:
 	uv sync --extra dev --extra llm
@@ -13,6 +13,9 @@ mcp:  ## 기관별 툴 MCP 서버 (stdio)
 
 proxy:  ## 실패 주입 프록시 단독 실행 (FAULT_PLAN=faults/example_plan.json)
 	$(PY) -m vendor_check.proxy
+
+companies:  ## 평가 대상 표본: DART 고유번호 목록에서 층별 추출 → data/companies.csv, reports/sampling.json (키 필요)
+	$(PY) -m vendor_check.eval.sample --out $(COMPANIES)
 
 groundtruth:  ## 정답 생성: 기관 API 직접 호출 (키 필요)
 	$(PY) -m vendor_check.eval.groundtruth --companies $(COMPANIES) --out $(TRUTH)
@@ -31,6 +34,9 @@ inject:  ## 실패 시나리오 전체 × 복구 전략 4종 × 두 시스템
 inject-confirm:  ## 같은 행렬을 동명 법인 확인을 준 대조군으로 (baseline+confirm 으로 집계)
 	$(PY) -m vendor_check.eval.run --truth $(TRUTH) --systems baseline --baseline-approver truth \
 		--limit $(LIMIT) --out reports/runs/inject-confirm.jsonl
+
+daily:  ## 하루치: inject 를 이어 돌고 끝나면 inject-confirm, eval 까지. 하루 호출 예산에 닿으면 멈춘다(다음 날 같은 명령)
+	$(MAKE) inject && $(MAKE) inject-confirm && $(MAKE) eval
 
 eval:  ## reports/runs/*.jsonl → reports/metrics.json → reports/RESULTS.md
 	$(PY) -m vendor_check.eval.report metrics --truth $(TRUTH)
