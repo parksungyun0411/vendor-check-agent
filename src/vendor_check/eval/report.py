@@ -1,7 +1,7 @@
 """지표 집계(metrics)와 결과표 생성(render).
 
-    python -m vendor_check.eval.report metrics   # reports/runs/*.jsonl → reports/metrics.json
-    python -m vendor_check.eval.report render    # reports/metrics.json → reports/RESULTS.md
+    uv run python -m vendor_check.eval.report metrics   # reports/runs/*.jsonl → reports/metrics.json
+    uv run python -m vendor_check.eval.report render    # reports/metrics.json → reports/RESULTS.md
 
 실측 기록이 없으면 표를 비워 두고 "측정 전"이라고만 적는다.
 """
@@ -16,7 +16,7 @@ from vendor_check.config import Settings
 from vendor_check.eval.metrics import summarize
 from vendor_check.eval.run import load_truth, run_key
 
-PENDING = "측정 전 — `make eval` 실행 후 자동 생성"
+PENDING = "측정 전. `make eval` 을 실행하면 채워집니다"
 
 
 def _fmt(v: object, pct: bool = True) -> str:

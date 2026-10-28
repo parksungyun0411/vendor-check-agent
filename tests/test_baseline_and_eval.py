@@ -24,7 +24,7 @@ from vendor_check.eval.run import (
 from vendor_check.eval.scenarios import all_scenarios, select
 from vendor_check.llm import StubReportWriter
 from vendor_check.pipeline import run_baseline
-from vendor_check.proxy import FaultRule, real_limit
+from vendor_check.proxy import FaultProxy, FaultRule, real_limit
 from vendor_check.recovery import FIELDS, RetryPolicy, Strategy, draft_report
 
 FAST = RetryPolicy(max_attempts=3, base_delay_s=0)
@@ -297,6 +297,28 @@ def test_real_limit_detects_upstream_quota_only():
     assert real_limit("fsc", httpx.Response(200, json={"response": {"header": {"resultCode": "00"}}})) is None
 
 
+async def test_per_second_limit_from_upstream_does_not_block_the_day():
+    daily = ("<OpenAPI_ServiceResponse><cmmMsgHeader>"
+             "<errMsg>LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR</errMsg>"
+             "<returnReasonCode>22</returnReasonCode></cmmMsgHeader></OpenAPI_ServiceResponse>")
+    per_second = {"OpenAPI_ServiceResponse": {"cmmMsgHeader": {
+        "errMsg": "LIMITED_NUMBER_OF_SERVICE_REQUESTS_PER_SECOND_EXCEEDS_ERROR",
+        "returnReasonCode": "23"}}}
+    assert real_limit("fsc", httpx.Response(200, text=daily)) == ("fsc: 공공데이터포털 한도 초과", True)
+    assert real_limit("fsc", httpx.Response(200, json=per_second)) == (
+        "fsc: 공공데이터포털 초당 한도 초과", False)
+
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=per_second)))
+    proxy = FaultProxy(upstreams={"fsc": "http://upstream"}, http=upstream)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=proxy.app()),
+                                 base_url="http://proxy") as client:
+        await client.get("/fsc/getCorpOutline_V2")
+    await upstream.aclose()
+    assert proxy.upstream_limit == "fsc: 공공데이터포털 초당 한도 초과"
+    assert proxy.limit_agency == "fsc" and proxy.limit_daily is False
+
+
 async def test_run_matrix_stops_without_recording_on_upstream_limit(make_stack, companies, tmp_path):
     out = tmp_path / "runs.jsonl"
     ledger = CallLedger(tmp_path / "calls.json", {"fsc": 100})
@@ -310,6 +332,22 @@ async def test_run_matrix_stops_without_recording_on_upstream_limit(make_stack, 
     # 버린 실행의 호출도 세고, 같은 날 다시 돌리면 바로 멈춘다
     again = CallLedger(tmp_path / "calls.json", {"fsc": 100})
     assert again.used["fsc"] >= 1 and again.exhausted() == ["fsc"]
+
+
+async def test_run_matrix_per_second_limit_drops_the_run_but_not_the_day(make_stack, companies,
+                                                                         tmp_path):
+    out = tmp_path / "runs.jsonl"
+    ledger = CallLedger(tmp_path / "calls.json", {"fsc": 100})
+    async with make_stack() as stack:
+        stack.proxy.upstream_limit, stack.proxy.limit_agency = "fsc: 공공데이터포털 초당 한도 초과", "fsc"
+        stack.proxy.limit_daily = False
+        with pytest.raises(UpstreamLimit):
+            await run_matrix(stack, [truth_of(by_id(companies, "syn-01"))], ["baseline"], [Strategy.NONE],
+                             select(["clean"]), StubReportWriter(), InMemorySaver(), out, FAST,
+                             ledger=ledger)
+    assert out.read_text(encoding="utf-8") == ""  # 기록하지 않는 것은 일일 한도와 같다
+    again = CallLedger(tmp_path / "calls.json", {"fsc": 100})
+    assert again.used["fsc"] >= 1 and again.exhausted() == []
 
 
 async def test_rerun_into_another_file_skips_runs_recorded_elsewhere(make_stack, companies, tmp_path):

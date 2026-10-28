@@ -6,11 +6,15 @@
 - item 필드: crno, corpNm, enpRprFnm, bzno, corpRegMrktDcd, corpRegMrktDcdNm, fssCorpUnqNo,
   fssCorpChgDtm 등
 
+발급 키로 확인한 것 (2026-10-27 정답 생성, 100곳 모두 상호 검색에서 사업자번호가 맞는 법인을 찾음):
+- JSON 응답이 response > body > items > item 경로로 오고, item 에 crno·corpNm·bzno 가 있다.
+
 UNVERIFIED:
-- JSON 응답의 최상위 키가 "response" 인지 (Swagger에는 xml name "response"만 있다).
 - 정상 resultCode 값. data.go.kr 관례인 "00"으로 가정했다.
 - 결과가 1건일 때 items.item 이 객체로 오는지 배열로 오는지. 둘 다 받는다.
 - corpRegMrktDcdNm 의 실제 값 목록. market 정규화는 문자열 포함 여부로만 한다.
+- fssCorpUnqNo 가 OpenDART corp_code 와 늘 같은 값인지. 그래서 이 번호로 찾은 DART 법인은
+  법인등록번호가 같을 때만 쓴다(pipeline.Steps.dart).
 - 같은 법인이 여러 행으로 오는지. crno 기준으로 fssCorpChgDtm 이 가장 늦은 행을 남긴다.
 """
 

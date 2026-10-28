@@ -10,7 +10,7 @@
 
 고유번호 목록은 날마다 바뀌므로, 같은 시드라도 목록을 받은 날이 다르면 표본이 달라진다.
 
-    python -m vendor_check.eval.sample --seed 42 --out data/companies.csv
+    uv run python -m vendor_check.eval.sample --seed 42 --out data/companies.csv
 """
 
 from __future__ import annotations

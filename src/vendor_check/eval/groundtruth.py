@@ -3,7 +3,8 @@
 입력 CSV 열: id, corp_name, bzno  (bzno 는 동명 법인 중 대상을 고르는 데 쓴다)
 조회가 하나라도 실패한 회사는 complete=false 로 남기고 실험에서 뺀다.
 
-    python -m vendor_check.eval.groundtruth --companies data/companies.csv --out data/ground_truth.jsonl
+    uv run python -m vendor_check.eval.groundtruth --companies data/companies.csv \
+        --out data/ground_truth.jsonl
 """
 
 from __future__ import annotations

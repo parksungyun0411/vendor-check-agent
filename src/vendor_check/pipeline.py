@@ -77,8 +77,9 @@ class Steps:
 
     async def dart(self, corp_name: str, match_crno: str | None = None,
                    corp_code: str | None = None) -> dict | None:
-        """DART 값. 금융위가 준 금감원 고유번호(= DART 고유번호)가 있으면 그것으로 바로 찾는다.
-        상호로 찾으면 금융위 '한일단조공업(주)'와 DART '한일단조'처럼 이름이 달라 놓칠 수 있다.
+        """DART 값. 금융위가 준 금감원 고유번호가 있으면 DART 고유번호로 보고 그것으로 바로 찾는다.
+        두 번호가 늘 같은지는 UNVERIFIED 라, 찾은 법인은 법인등록번호가 같을 때만 쓴다.
+        상호로 찾으면 금융위 '가나공업(주)'와 DART '가나'처럼 이름이 달라 놓칠 수 있다.
         고유번호 목록에 없으면 비상장으로 보고 market=NONE."""
         if corp_code:
             r = await self.call("dart_company", {"corp_code": corp_code})

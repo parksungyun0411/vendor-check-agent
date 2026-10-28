@@ -1,7 +1,7 @@
 """거래처 한 곳을 대화형으로 점검한다. 동명 법인이면 터미널에서 고른다.
 
-    python -m vendor_check.cli check "상호명"
-    python -m vendor_check.cli resume <thread_id>     # 한도 초과로 멈춘 점검을 이어 간다
+    uv run python -m vendor_check.cli check "상호명"
+    uv run python -m vendor_check.cli resume <thread_id>     # 한도 초과로 멈춘 점검을 이어 간다
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ async def _main(args: argparse.Namespace) -> None:
             thread_id = args.target
             out = await drive(graph, thread_id, ask_human, resume_quota=True)
     if out["status"] == "interrupted":
-        print(f"한도 초과로 멈췄습니다. 내일 이어서: python -m vendor_check.cli resume {thread_id}")
+        print(f"한도 초과로 멈췄습니다. 내일 이어서: uv run python -m vendor_check.cli resume {thread_id}")
     print(json.dumps({k: out.get(k) for k in ("status", "report", "summary")},
                      ensure_ascii=False, indent=1))
 

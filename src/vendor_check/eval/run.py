@@ -8,8 +8,8 @@ proxy.reset_quota() 로 "다음 날"을 만들고, 에이전트는 체크포인�
 승인자로 법인을 고르고, 기록은 baseline+confirm 으로 따로 집계된다. 두 대조군을 함께 보면 확인
 단계의 효과와 그래프 구조의 효과를 나눠 볼 수 있다.
 
-    python -m vendor_check.eval.run --systems baseline agent --out reports/runs/run.jsonl
-    python -m vendor_check.eval.run --systems baseline --baseline-approver truth \
+    uv run python -m vendor_check.eval.run --systems baseline agent --out reports/runs/run.jsonl
+    uv run python -m vendor_check.eval.run --systems baseline --baseline-approver truth \
         --out reports/runs/baseline-confirm.jsonl
 """
 
@@ -213,7 +213,8 @@ async def run_matrix(stack: Stack, truths: list[dict], systems: list[str],
                         if stack.proxy.upstream_limit:
                             if ledger:  # 버리는 실행도 호출은 했다
                                 ledger.add(rec["forwarded"])
-                                ledger.block(stack.proxy.limit_agency or "unknown")
+                                if stack.proxy.limit_daily:  # 초당 한도는 같은 날 다시 돌 수 있다
+                                    ledger.block(stack.proxy.limit_agency or "unknown")
                             raise UpstreamLimit(f"{stack.proxy.upstream_limit} (기록 {len(records)}건, "
                                                 f"건너뜀 {skipped}건, 마지막 실행은 버림)")
                         if ledger:
