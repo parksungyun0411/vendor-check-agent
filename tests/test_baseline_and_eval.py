@@ -307,6 +307,8 @@ async def test_per_second_limit_from_upstream_does_not_block_the_day():
     assert real_limit("fsc", httpx.Response(200, text=daily)) == ("fsc: 공공데이터포털 한도 초과", True)
     assert real_limit("fsc", httpx.Response(200, json=per_second)) == (
         "fsc: 공공데이터포털 초당 한도 초과", False)
+    assert real_limit("fsc", httpx.Response(429, json=per_second)) == (
+        "fsc: 공공데이터포털 초당 한도 초과", False)
 
     upstream = httpx.AsyncClient(transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json=per_second)))

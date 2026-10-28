@@ -53,12 +53,13 @@ def real_limit(agency: str, resp: httpx.Response) -> tuple[str, bool] | None:
     """업스트림이 실제로 돌려준 한도 초과 신호. 이 상태로 실험을 이어 가면 주입하지 않은 실패가
     결과에 섞이므로, 러너가 보고 멈춘다. (주입한 quota 는 업스트림까지 가지 않아 여기 걸리지 않는다.)
 
-    (내용, 그날을 막을지)를 돌려준다. 공공데이터포털 초당 한도(23)는 잠시 뒤 풀리므로 그날을 막지 않는다."""
-    if resp.status_code == 429:
-        return f"{agency}: HTTP 429", True
+    (내용, 그날을 막을지)를 돌려준다. 공공데이터포털 초당 한도(23)는 잠시 뒤 풀리므로 그날을 막지 않는다.
+    23 의 HTTP 상태는 UNVERIFIED 라 429 보다 본문을 먼저 본다."""
     text = resp.content[:4000].decode("utf-8", "ignore")
     if "LIMITED_NUMBER_OF_SERVICE_REQUESTS_PER_SECOND" in text:
         return f"{agency}: 공공데이터포털 초당 한도 초과", False
+    if resp.status_code == 429:
+        return f"{agency}: HTTP 429", True
     if "LIMITED_NUMBER_OF_SERVICE_REQUESTS" in text:
         return f"{agency}: 공공데이터포털 한도 초과", True
     if agency == "dart" and REAL_LIMIT_DART.search(text):
